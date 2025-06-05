@@ -14,13 +14,13 @@ from torchvision import models
 def transfer_style_autoencoder(args):
     if args.style == "colorful_glass":
         model_path = "colorful_glass_autoencoder.pth"
-        url = 'https://drive.google.com/file/d/18Kmbmg48W-rEqTk3RGF48sJaml3EzUtQ/view?usp=sharing'
+        url = 'https://drive.google.com/uc?id=18Kmbmg48W-rEqTk3RGF48sJaml3EzUtQ'
     elif args.style == "van_gogh":
         model_path = "van_gogh_autoencoder.pth"
-        url = 'https://drive.google.com/file/d/1AF908RR-osRQ27Hq1IUygKDUuRKEkdGh/view?usp=sharing'
+        url = 'https://drive.google.com/uc?id=1AF908RR-osRQ27Hq1IUygKDUuRKEkdGh'
         
     if not os.path.exists(model_path):
-        print("\nDownloading model params...'")
+        print("\nDownloading model params...")
         gdown.download(url, model_path, quiet=False)
         print("Model downloaded successfully! Proceeding.\n")
         
