@@ -14,17 +14,17 @@ from torchvision import models
 def transfer_style_autoencoder(args):
     if args.style == "colorful_glass":
         model_path = "colorful_glass_autoencoder.pth"
-        url = 'https://drive.google.com/uc?id=18Kmbmg48W-rEqTk3RGF48sJaml3EzUtQ'
+        url = "https://drive.google.com/uc?id=18Kmbmg48W-rEqTk3RGF48sJaml3EzUtQ"
     elif args.style == "van_gogh":
         model_path = "van_gogh_autoencoder.pth"
-        url = 'https://drive.google.com/uc?id=1AF908RR-osRQ27Hq1IUygKDUuRKEkdGh'
-        
+        url = "https://drive.google.com/uc?id=1AF908RR-osRQ27Hq1IUygKDUuRKEkdGh"
+
     if not os.path.exists(model_path):
         print("\nDownloading model params...")
         gdown.download(url, model_path, quiet=False)
         print("Model downloaded successfully! Proceeding.\n")
-        
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = StrongUNetNoSkips()
     model.load_state_dict(torch.load(model_path, map_location=device))
@@ -43,8 +43,7 @@ def transfer_style_autoencoder(args):
 
 
 def transfer_style_vgg(args):
-
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     content_img = load_image(args.content).to(device)
     style_img = load_image(args.style).to(device)
@@ -62,34 +61,74 @@ def transfer_style_vgg(args):
     style_feats = get_features(style_img, vgg, style_layers)
     style_grams = {l: gram_matrix(style_feats[l]) for l in style_layers}
 
-    optimizer = optim.Adam([target], lr=args.lr)
+    if args.optimizer == "lbfgs":
+        optimizer = optim.LBFGS([target])
 
-    print(f"\nStarting VGG Style Transfer with {args.steps} steps...")
+        iteration_count = [0]
 
-    try:
-        for i in range(1, args.steps + 1):
+        def closure():
+            nonlocal iteration_count
             optimizer.zero_grad()
+
             feats_t = get_features(target, vgg, layers)
 
+            # Content loss
             c_loss = torch.mean(
                 (feats_t[content_layers[0]] - content_feats[content_layers[0]]) ** 2
             )
 
+            # Style loss
             s_loss = 0
             for l in style_layers:
                 Gt = gram_matrix(feats_t[l])
                 A = style_grams[l]
                 s_loss += torch.mean((Gt - A) ** 2)
 
+            # Total loss
             loss = args.alpha * c_loss + args.beta * s_loss
             loss.backward()
-            optimizer.step()
 
-            if i % 50 == 0 or i == 1:
+            iteration_count[0] += 1
+            if iteration_count[0] % 10 == 0 or iteration_count[0] == 1:
                 print(
-                    f"   Iter {i:4d}/{args.steps} | Loss: {loss.item():8.2f} | "
+                    f"   Iter {iteration_count[0]:4d} | Loss: {loss.item():8.2f} | "
                     f"Content: {c_loss.item():8.2f} | Style: {s_loss.item():8.8f}"
                 )
+
+            return loss
+
+    else:
+        optimizer = optim.Adam([target], lr=0.2)
+
+    try:
+        if args.optimizer == "lbfgs":
+            for _ in range(args.steps // 20):
+                optimizer.step(closure)
+
+        else:
+            for i in range(1, args.steps + 1):
+                optimizer.zero_grad()
+                feats_t = get_features(target, vgg, layers)
+
+                c_loss = torch.mean(
+                    (feats_t[content_layers[0]] - content_feats[content_layers[0]]) ** 2
+                )
+
+                s_loss = 0
+                for l in style_layers:
+                    Gt = gram_matrix(feats_t[l])
+                    A = style_grams[l]
+                    s_loss += torch.mean((Gt - A) ** 2)
+
+                loss = args.alpha * c_loss + args.beta * s_loss
+                loss.backward()
+                optimizer.step()
+
+                if i % 50 == 0 or i == 1:
+                    print(
+                        f"   Iter {i:4d}/{args.steps} | Loss: {loss.item():8.2f} | "
+                        f"Content: {c_loss.item():8.2f} | Style: {s_loss.item():8.8f}"
+                    )
 
     except KeyboardInterrupt:
         print("\nStopped by user. Saving current output...")
@@ -155,10 +194,10 @@ How to use:
         help="Where to save output image: vgg_output.jpg as default",
     )
     vgg_parser.add_argument(
-        "--alpha", type=float, default=1, help="Content weight (default: 1)"
+        "--alpha", type=float, default=1e2, help="Content weight (default: 1e2)"
     )
     vgg_parser.add_argument(
-        "--beta", type=float, default=1e12, help="Style weight (default: 1e12)"
+        "--beta", type=float, default=1e10, help="Style weight (default: 1e10)"
     )
     vgg_parser.add_argument(
         "--steps",
@@ -167,16 +206,18 @@ How to use:
         help="Number of picture optimisation iterations (default: 1000)",
     )
     vgg_parser.add_argument(
-        "--lr", type=float, default=0.02, help="Learning rate (default: 0.02)"
+        "--optimizer",
+        type=str,
+        default="lbfgs",
+        help="Optimizer (default: lbfgs)",
     )
-    # Parsowanie argumentów
+
     args = parser.parse_args()
 
     if args.method is None:
         parser.print_help()
         sys.exit(1)
 
-    # Sprawdzanie plików wejściowych
     if args.method == "autoencoder":
         if not os.path.exists(args.input):
             print(f"❌ Error: Missing file '{args.input}'")
@@ -189,7 +230,6 @@ How to use:
             print(f"❌ Error: Missing file '{args.style}'")
             sys.exit(1)
 
-    # Wykonanie transferu stylu
     print("\n" + "=" * 60)
     print("🎨 STYLE TRANSFER CLI")
     print("=" * 60)
